@@ -1,0 +1,12 @@
+[project]
+name = "typst-package-installer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "platformdirs>=4.3.7",
+]
+
+[project.scripts]
+typi = "typi.__main__:main"
