@@ -5,7 +5,7 @@ import tomllib
 import shutil
 
 
-def check_package(path: str) -> str | None:
+def check_package(path: str):
     if os.path.exists(path):
         if not os.path.exists(os.path.join(path, "typst.toml")):
             return None
@@ -14,12 +14,12 @@ def check_package(path: str) -> str | None:
                 config = tomllib.load(f)
                 f.close()
             version = config["package"]["version"]
-            return version
-    return None
+            name = config["package"]["name"]
+            return version, name
+    return None, None
 
 
-def install_package(local_path: str, path: str, version: str):
-    name = os.path.split(path.strip(os.sep))[-1]
+def install_package(local_path: str, path: str, version: str, name: str):
     if not os.path.exists(os.path.join(local_path, name, version)):
         os.makedirs(os.path.join(local_path, name, version))
     shutil.copytree(
@@ -43,8 +43,8 @@ def main():
     parser.add_argument("path", help="Path to the package source")
     args = parser.parse_args()
 
-    version = check_package(args.path)
+    version, name = check_package(args.path)
     if version is None:
         parser.error("provided path does not contain 'typst.toml' file")
 
-    install_package(local_path, args.path, version)
+    install_package(local_path, args.path, version, name)
