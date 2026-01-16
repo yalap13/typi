@@ -170,4 +170,4 @@ def main() -> None:
             str(args.path).lstrip("git+"), local_path, args.update
         )
         return
-    install_package(local_path, Path(args.path), args.update)
+    install_package(local_path, Path(args.path).resolve(), args.update)
