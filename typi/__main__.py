@@ -1,62 +1,118 @@
+from fnmatch import fnmatch
 import os
 import argparse
-from typing import Optional
 import platformdirs
 import tomllib
 import shutil
 from pathlib import Path
 import subprocess
 import tempfile
+import re
 
 
-def check_package(path: Path) -> tuple[Optional[str], Optional[str]]:
+IMPORT_RE = re.compile(r'#import\s+"([^"]+)"')
+ASSET_RE = re.compile(r'(image|read)\s*\(\s*"([^"]+)"\s*\)')
+
+
+def collect_files(entrypoint: Path, package_root: Path) -> set[Path]:
+    discovered = set()
+    stack = [entrypoint.resolve()]
+
+    while stack:
+        current = stack.pop()
+        if "@" in str(current):
+            continue
+        if current in discovered:
+            continue
+        if not current.exists():
+            raise FileNotFoundError(
+                f"Missing file: {current.relative_to(package_root)}"
+            )
+        discovered.add(current)
+        if current.suffix != ".typ":
+            continue
+        text = current.read_text(encoding="utf-8")
+        base = current.parent
+
+        for rel in IMPORT_RE.findall(text):
+            dep = (base / rel).resolve()
+            stack.append(dep)
+
+        for _, rel in ASSET_RE.findall(text):
+            asset = (base / rel).resolve()
+            if not asset.exists():
+                continue
+            stack.append(asset)
+    return discovered
+
+
+def apply_excludes(files: set[Path], root: Path, excludes: list[str]) -> set[Path]:
+    if not excludes:
+        return files
+    kept = set()
+    for path in files:
+        rel = path.relative_to(root).as_posix()
+        if any(fnmatch(rel, pat) for pat in excludes):
+            continue
+        kept.add(path)
+    return kept
+
+
+def check_package(path: Path) -> dict:
     if path.exists():
         subpath = path / "typst.toml"
         if not subpath.exists():
-            return None, None
+            raise FileNotFoundError("No typst.toml in this directory")
         else:
             with open(subpath, "rb") as f:
                 config = tomllib.load(f)
                 f.close()
-            version = config["package"]["version"]
-            name = config["package"]["name"]
-            return version, name
-    return None, None
+            pkg_config = config.get("package", None)
+            if pkg_config is None:
+                raise RuntimeError("Not a valid typst.toml")
+            return pkg_config
+    raise FileNotFoundError("Directory does not exist")
 
 
-def copy_package_files(source: Path, destination: Path) -> None:
-    shutil.copytree(
-        source,
-        destination,
-        ignore=shutil.ignore_patterns(".gitignore", ".git", "*.pdf"),
-        dirs_exist_ok=True,
-    )
+def copy_package_files(files: set[Path], package_root: Path, target_root: Path) -> None:
+    for src in files:
+        rel = src.relative_to(package_root)
+        dst = target_root / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
 
 
-def install_package(
-    local_path: Path, path: Path, version: str, name: str, update: bool
-) -> None:
-    package_path = local_path / name
-    if not package_path.exists():
-        os.makedirs(package_path)
-    version_path = package_path / version
-    if version_path.exists():
-        if not update:
-            print(
-                "Package '{}:{}' already installed, skipping.\nTo update use '-u' or '--update'.".format(
-                    name, version
-                )
+def install_package(local_path: Path, package_path: Path, update: bool) -> None:
+    pkg_config = check_package(package_path)
+    version_subpath = local_path / pkg_config["name"] / pkg_config["version"]
+    if version_subpath.exists() and not update:
+        print(
+            "Package '{}:{}' already installed, skipping.\nTo update use '-u' or '--update'.".format(
+                pkg_config["name"], pkg_config["version"]
             )
-            return
-        copy_package_files(path, version_path)
-        print("Updated package '{}:{}'".format(name, version))
+        )
         return
-    os.makedirs(version_path)
-    copy_package_files(path, version_path)
-    print("Installed package '{}:{}'".format(name, version))
+    entrypoint = package_path / pkg_config["entrypoint"]
+    excludes = pkg_config.get("exclude", [])
+    files = collect_files(entrypoint, package_path)
+    files = apply_excludes(files, package_path, excludes)
+    files.add((package_path / "typst.toml").resolve())
+    readme = package_path / "README.md"
+    license_ = package_path / "LICENSE"
+    if readme.exists():
+        files.add(readme.resolve())
+    if license_.exists():
+        files.add(license_.resolve())
+    copy_package_files(files, package_path, version_subpath)
+    if version_subpath.exists() and update:
+        print("Updated package {}:{}".format(pkg_config["name"], pkg_config["version"]))
+    else:
+        print(
+            "Installed package {}:{}".format(pkg_config["name"], pkg_config["version"])
+        )
 
 
-def clone_repository(url: str, local_path: Path, update: bool) -> None:
+def clone_repository_and_install(url: str, local_path: Path, update: bool) -> None:
     if shutil.which("git") is None:
         raise RuntimeError("Git is not installed, cannot proceed")
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -64,13 +120,7 @@ def clone_repository(url: str, local_path: Path, update: bool) -> None:
             ["git", "clone", "--depth", "1", url, str(temp_dir)],
             check=True,
         )
-        # print(os.listdir(temp_dir))
-        version, name = check_package(Path(temp_dir))
-        if version is None or name is None:
-            raise RuntimeError(
-                "git repository is not a valid typst package, does not contain 'typst.toml' file"
-            )
-        install_package(local_path, Path(temp_dir), version, name, update)
+        install_package(local_path, Path(temp_dir), update)
 
 
 def main() -> None:
@@ -89,11 +139,8 @@ def main() -> None:
     args = parser.parse_args()
 
     if str(args.path).startswith("git+"):
-        clone_repository(str(args.path).lstrip("git+"), local_path, args.update)
+        clone_repository_and_install(
+            str(args.path).lstrip("git+"), local_path, args.update
+        )
         return
-
-    version, name = check_package(Path(args.path))
-    if version is None or name is None:
-        parser.error("provided path does not contain 'typst.toml' file")
-
-    install_package(local_path, args.path, version, name, args.update)
+    install_package(local_path, Path(args.path), args.update)
