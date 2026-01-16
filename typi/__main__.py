@@ -1,4 +1,5 @@
 from fnmatch import fnmatch
+from tabulate import tabulate
 import os
 import argparse
 import platformdirs
@@ -123,6 +124,21 @@ def clone_repository_and_install(url: str, local_path: Path, update: bool) -> No
         install_package(local_path, Path(temp_dir), update)
 
 
+def list_installed_packages(local_path: Path) -> None:
+    packages = {}
+    for pkg in local_path.iterdir():
+        packages[pkg.name] = [ver.name for ver in (local_path / pkg).iterdir()]
+    out = "-" * 38 + "\n"
+    out += "Installed typst packages and versions\n"
+    out += "-" * 38 + "\n"
+    table_data = []
+    for pkg, versions in packages.items():
+        table_data.append([pkg, ", ".join(versions)])
+    table = tabulate(table_data, tablefmt="plain")
+    out += table
+    print(out)
+
+
 def main() -> None:
     data_dir = platformdirs.user_data_dir()
     local_path = Path(data_dir) / "typst" / "packages" / "local"
@@ -132,11 +148,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         prog="typi", description="Minimalistic Typst local package installer."
     )
-    parser.add_argument("path", help="Path to the package source", type=str)
+    parser.add_argument(
+        "path", help="Path to the package source", type=str, nargs="?", default=""
+    )
     parser.add_argument(
         "-u", "--update", help="Update the specified package", action="store_true"
     )
+    parser.add_argument(
+        "-l", "--list", help="Lists installed packages", action="store_true"
+    )
     args = parser.parse_args()
+
+    if args.path == "" and not args.list:
+        parser.error("Argument 'path' must be specified")
+    if args.path == "" and args.list:
+        list_installed_packages(local_path)
+        return
 
     if str(args.path).startswith("git+"):
         clone_repository_and_install(
