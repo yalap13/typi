@@ -5,6 +5,8 @@ import platformdirs
 import tomllib
 import shutil
 from pathlib import Path
+import subprocess
+import tempfile
 
 
 def check_package(path: Path) -> tuple[Optional[str], Optional[str]]:
@@ -54,8 +56,21 @@ def install_package(
     print("Installed package '{}:{}'".format(name, version))
 
 
-# def clone_repository(url: str):
-#     pass
+def clone_repository(url: str, local_path: Path, update: bool) -> None:
+    if shutil.which("git") is None:
+        raise RuntimeError("Git is not installed, cannot proceed")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        subprocess.run(
+            ["git", "clone", "--depth", "1", url, str(temp_dir)],
+            check=True,
+        )
+        # print(os.listdir(temp_dir))
+        version, name = check_package(Path(temp_dir))
+        if version is None or name is None:
+            raise RuntimeError(
+                "git repository is not a valid typst package, does not contain 'typst.toml' file"
+            )
+        install_package(local_path, Path(temp_dir), version, name, update)
 
 
 def main() -> None:
@@ -68,15 +83,14 @@ def main() -> None:
         prog="typi", description="Minimalistic Typst local package installer."
     )
     parser.add_argument("path", help="Path to the package source", type=str)
-    # parser.add_argument("-g", "--git", help="Install from git repository", type=str)
     parser.add_argument(
         "-u", "--update", help="Update the specified package", action="store_true"
     )
     args = parser.parse_args()
 
-    # if args.git:
-    #     path = clone_repository(args.git)
-    #     version, name = check_package(path)
+    if str(args.path).startswith("git+"):
+        clone_repository(str(args.path).lstrip("git+"), local_path, args.update)
+        return
 
     version, name = check_package(Path(args.path))
     if version is None or name is None:
