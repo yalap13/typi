@@ -1,6 +1,6 @@
 # Typst package installer
 
-Simple CLI to install packages from a local directory or from git. **This is
+Simple CLI to install packages from a local directory or from git. **This is not
 an official package manager**, I simply wanted a simple tool for myself and
 decided to share it.
 
