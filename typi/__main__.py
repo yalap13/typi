@@ -151,6 +151,14 @@ def list_installed_packages(local_path: Path) -> None:
     print(out)
 
 
+def delete_package_version(local_path: Path, package: str, version: str) -> None:
+    path = local_path / package / version
+    shutil.rmtree(path)
+    if list((local_path / package).glob("*")) == []:
+        (local_path / package).rmdir()
+    print("Deleted package {}:{}".format(package, version))
+
+
 def main() -> None:
     data_dir = platformdirs.user_data_dir()
     local_path = Path(data_dir) / "typst" / "packages" / "local"
@@ -161,10 +169,20 @@ def main() -> None:
         prog="typi", description="Minimalistic Typst local package installer."
     )
     parser.add_argument(
-        "path", help="Path to the package source", type=str, nargs="?", default=""
+        "path",
+        help="Path to the package source. Can either be a local path, a git path ('git+...') or the package path '@local/package:version' for deletion.",
+        type=str,
+        nargs="?",
+        default="",
     )
     parser.add_argument(
         "-u", "--update", help="Update the specified package", action="store_true"
+    )
+    parser.add_argument(
+        "-d",
+        "--delete",
+        help="Deletes the specified package version",
+        action="store_true",
     )
     parser.add_argument(
         "-l", "--list", help="Lists installed packages", action="store_true"
@@ -182,4 +200,14 @@ def main() -> None:
             str(args.path).lstrip("git+"), local_path, args.update
         )
         return
+
+    if args.delete and not str(args.path).startswith("@local/"):
+        parser.error(
+            "Path must be of a locally installed package and start with '@local/'"
+        )
+    if str(args.path).startswith("@local/") and args.delete:
+        package, version = str(args.path).lstrip("@local/").split(":")
+        delete_package_version(local_path, package, version)
+        return
+
     install_package(local_path, Path(args.path).resolve(), args.update)
