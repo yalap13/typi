@@ -11,3 +11,6 @@ dependencies = [
 
 [project.scripts]
 typi = "typi.__main__:main"
+
+[dependency-groups]
+dev = []

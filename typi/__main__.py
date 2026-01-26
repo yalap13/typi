@@ -71,7 +71,7 @@ def check_package(path: Path) -> dict:
             pkg_config = config.get("package", None)
             if pkg_config is None:
                 raise RuntimeError("Not a valid typst.toml")
-            return pkg_config
+            return config
     raise FileNotFoundError("Directory does not exist")
 
 
@@ -84,7 +84,9 @@ def copy_package_files(files: set[Path], package_root: Path, target_root: Path) 
 
 
 def install_package(local_path: Path, package_path: Path, update: bool) -> None:
-    pkg_config = check_package(package_path)
+    config = check_package(package_path)
+    pkg_config = config["package"]
+    template_config = config.get("template", None)
     version_subpath = local_path / pkg_config["name"] / pkg_config["version"]
     if version_subpath.exists() and not update:
         print(
@@ -100,10 +102,20 @@ def install_package(local_path: Path, package_path: Path, update: bool) -> None:
     files.add((package_path / "typst.toml").resolve())
     readme = package_path / "README.md"
     license_ = package_path / "LICENSE"
+    assets = package_path / "assets"
     if readme.exists():
         files.add(readme.resolve())
     if license_.exists():
         files.add(license_.resolve())
+    if assets.exists():
+        for file in assets.glob("*"):
+            files.add(file.resolve())
+    if template_config is not None:
+        files.add(
+            (
+                package_path / template_config["path"] / template_config["entrypoint"]
+            ).resolve()
+        )
     copy_package_files(files, package_path, version_subpath)
     if version_subpath.exists() and update:
         print("Updated package {}:{}".format(pkg_config["name"], pkg_config["version"]))
